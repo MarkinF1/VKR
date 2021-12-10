@@ -1,0 +1,4 @@
+Uploading LFS objects:   0% (0/33), 746 MB | 995 KB/s, done.
+batch response: Post "https://github.com/MarkinF1/VKR.git/info/lfs/objects/batch": dial tcp: lookup github.com: no such host
+batch response: Post "https://github.com/MarkinF1/VKR.git/info/lfs/objects/batch": dial tcp: lookup github.com: no such host
+error: failed to push some refs to 'https://github.com/MarkinF1/VKR.git'

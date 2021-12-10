@@ -5,83 +5,129 @@ from datasets import PascalVOCDataset
 from tqdm import tqdm
 from Lib.data.heridal_dataset import HRDLDataset
 from pprint import PrettyPrinter
+import statistics as st
 
 # Good formatting when printing the APs for each class and mAP
 pp = PrettyPrinter()
 
 # Parameters
 data_folder = 'C:/Python/Datasets/heridal/test_train_Images/'
-keep_difficult = True  # difficult ground truth objects must always be considered in mAP calculation, because these objects DO exist!
+keep_difficult = True
 batch_size = 2
 workers = 2
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-checkpoint = './checkpoints/best_save/checkpoint_frcnn.pth.tar'
+checkpoint = './checkpoints/best_save/checkpoint_fpn.pth.tar'
 
 # Load model checkpoint that is to be evaluated
 checkpoint = torch.load(checkpoint)
 model = checkpoint['model']
 model = model.to(device)
 
-# Switch to eval mode
-model.eval()
-
 # Load test data
 test_dataset = HRDLDataset(data_folder, 'test', 'test', use_difficult=keep_difficult)
 test_loader = torch.utils.data.DataLoader(test_dataset, 1, False, num_workers=workers)
 
+
+def chek_crossing(a, b):
+    if a[0] >= b[2] or a[1] >= b[3]:
+        return 0, 0
+    if b[0] <= a[0] <= b[2]:
+        if b[0] <= a[2] <= b[2]:
+            if a[1] >= b[3]:
+                return 0, 0
+            if b[1] <= a[1] <= b[3]:
+                if b[1] <= a[3] <= b[3]:
+                    return 1, (a[2] - a[0]) * (a[3] - a[1])
+                return 1, (a[2] - a[0]) * (b[3] - a[1])
+            if a[3] <= b[1]:
+                return 0, 0
+            if b[1] <= a[3] <= b[3]:
+                return 1, (a[2] - a[0]) * (a[3] - b[1])
+            if a[3] >= b[3]:
+                return 1, (a[2] - a[0]) * (b[3] - b[1])
+            return 0, 0
+        if b[1] <= a[1] <= b[3]:
+            if b[1] <= a[3] <= b[3]:
+                return 1, (b[2] - a[0]) * (a[3] - a[1])
+            return 1, (b[2] - a[0]) * (b[3] - a[1])
+        if a[1] <= b[1] <= a[3] <= b[3]:
+            return 1, (b[2] - a[0]) * (a[3] - b[1])
+        if a[1] <= b[1] and a[3] >= b[3]:
+            return 1, (b[2] - a[0]) * (b[3] - b[1])
+        return 0, 0
+    if a[2] <= b[0]:
+        return 0, 0
+    if a[2] >= b[2]:
+        if a[1] >= b[3]:
+            return 0, 0
+        if b[1] <= a[1] <= b[3]:
+            if b[1] <= a[3] <= b[3]:
+                return 1, (b[2] - b[0]) * (a[3] - a[1])
+            return 1, (b[2] - b[0]) * (b[3] - a[1])
+        if b[1] <= a[3] <= b[3]:
+            return 1, (b[2] - b[0]) * (a[3] - b[1])
+        if a[3] >= b[3]:
+            return 1, (b[2] - b[0]) * (b[3] - b[1])
+        return 0, 0
+    if b[1] <= a[1] <= a[3] <= b[3]:
+        return 1, (a[2] - b[0]) * (a[3] - a[1])
+    if a[1] <= b[1] <= a[3] <= b[3]:
+        return 1, (a[2] - b[0]) * (a[3] - b[1])
+    if b[1] <= a[1] <= b[3] <= a[3]:
+        return 1, (a[2] - b[0]) * (b[3] - a[1])
+    if a[1] <= b[1] <= b[3] <= a[3]:
+        return 1, (a[2] - b[0]) * (b[3] - b[1])
+    return 0, 0
+
+
 def evaluate(test_loader, model):
-    """
-    Evaluate.
 
-    :param test_loader: DataLoader for test data
-    :param model: model
-    """
-
-    # Make sure it's in eval mode
     model.eval()
 
-    # Lists to store detected and true boxes, labels, scores
-    det_boxes = list()
-    det_labels = list()
-    det_scores = list()
-    true_boxes = list()
-    true_labels = list()
-    true_difficulties = list()  # it is necessary to know which objects are 'difficult', see 'calculate_mAP' in utils.py
-
     with torch.no_grad():
-        # Batches
+        true_positive = 0
+        true_negative = 0
+        false_positive = 0
+        false_negative = 0
         for images, boxes, labels, difficulties in tqdm(test_loader):
-            images = images.to(device)  # (N, 3, 300, 300)
 
-            # Forward prop.
+            images = images.to(device)
+
             det_boxes_batch, det_labels_batch, det_scores_batch = model(images)
-            det_boxes_batch = list(torch.from_numpy(det_boxes_batch))
-            det_labels_batch = list(torch.from_numpy(det_labels_batch))
-            det_scores_batch = list(torch.from_numpy(det_scores_batch))
+            det_boxes_batch = torch.from_numpy(det_boxes_batch)
 
-            # Detect objects in SSD output
-            #det_boxes_batch, det_labels_batch, det_scores_batch = model.detect_objects(predicted_locs, predicted_scores, min_score=0.01, max_overlap=0.45, top_k=200)
-            # Evaluation MUST be at min_score=0.01, max_overlap=0.45, top_k=200 for fair comparision with the paper's results and other repos
+            true = 0
+            mean_boxes_square = st.mean([((k[2] - k[0]) * (k[3] - k[1])).tolist() for k in boxes[0]])
+            for i in boxes[0]:
+                for k in det_boxes_batch:
+                    fl1, sq1 = chek_crossing(i, k)
+                    fl2, sq2 = chek_crossing(k, i)
+                    if fl1 == 0 and fl2 == 0:
+                        continue
+                    if sq2 > sq1:
+                        sq = sq2
+                    else:
+                        sq = sq1
+                    if sq >= 0.4 * (i[2] - i[0]) * (i[3] - i[1]):
+                        true += 1
+                        break
 
-            # Store this batch's results for mAP calculation
-            boxes = [b.to(device) for b in boxes]
-            labels = [l.to(device) for l in labels]
-            difficulties = [d.to(device) for d in difficulties]
+            true_negative += 500 * 500/mean_boxes_square - true - (len(boxes[0]) - true) - (len(det_boxes_batch) - true)
+            true_positive += true
+            false_negative += len(boxes[0]) - true
+            false_positive += len(det_boxes_batch) - true
 
-            det_boxes.extend(det_boxes_batch)
-            det_labels.extend(det_labels_batch)
-            det_scores.extend(det_scores_batch)
-            true_boxes.extend(boxes)
-            true_labels.extend(labels)
-            true_difficulties.extend(difficulties)
+    print("*" * 40)
+    print("FPN:")
+    print("*" * 40)
+    print([true_positive, false_positive])
+    print([false_negative, true_negative], '\n')
 
-        # Calculate mAP
-        APs, mAP = calculate_mAP(det_boxes, det_labels, det_scores, true_boxes, true_labels, true_difficulties)
+    recall = true_positive / (true_positive + false_negative)
+    precision = true_positive / (true_positive + false_positive)
 
-    # Print AP for each class
-    pp.pprint(APs)
-
-    print('\nMean Average Precision (mAP): %.3f' % mAP)
+    print("Recall =", recall)
+    print("Precision =", precision)
 
 
 if __name__ == '__main__':

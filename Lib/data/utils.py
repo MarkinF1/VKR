@@ -30,6 +30,7 @@ def read_image(path, dtype=np.float32, color=True):
 
 
 def resize_image(img, min_size, max_size):
+
     # resize img
     c, h, w = img.shape
     scale1 = min_size / min(h, w)

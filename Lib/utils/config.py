@@ -14,8 +14,8 @@ class Config:
 
     # dataset
     data_dir = './'
-    min_size = 600   # image resize
-    max_size = 1000  # image resize
+    min_size = 500   # image resize
+    max_size = 500  # image resize
     n_workers_train = 2
     n_workers_test = 2
     dataset = './'
